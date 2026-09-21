@@ -9,6 +9,7 @@ object is exposed. This module has no knowledge of HTTP requests or
 browsers, so there is no code path that could leak the key to a client.
 """
 import os
+import re
 
 import cohere
 
@@ -98,28 +99,46 @@ def _source_label(chunk: dict) -> str:
     return f"[Source: {title}, Page: {chunk['page_number']}]"
 
 
-def _insert_inline_citations(text: str, citations: list, by_id: dict[str, dict]) -> str:
-    """Insert a "[Source: ..., Section: ...]" marker right after each cited
-    span, using Cohere's citation offsets. Insertion happens back-to-front
-    so earlier offsets aren't invalidated by earlier insertions."""
-    inserts: list[tuple[int, str]] = []
-    for citation in citations:
-        if citation.end is None:
-            continue
-        labels: list[str] = []
-        for source in (citation.sources or []):
-            chunk = by_id.get(getattr(source, "id", None))
-            if chunk:
-                label = _source_label(chunk)
-                if label not in labels:
-                    labels.append(label)
-        if labels:
-            inserts.append((citation.end, " " + " ".join(labels)))
+def _split_paragraphs(text: str) -> list[tuple[int, int, str]]:
+    """Split text into (start, end, paragraph_text) ranges on blank lines."""
+    paragraphs = []
+    start = 0
+    for m in re.finditer(r"\n\s*\n", text):
+        paragraphs.append((start, m.start(), text[start:m.start()]))
+        start = m.end()
+    paragraphs.append((start, len(text), text[start:len(text)]))
+    return paragraphs
 
-    inserts.sort(key=lambda pair: pair[0], reverse=True)
-    for pos, label in inserts:
-        text = text[:pos] + label + text[pos:]
-    return text
+
+def _insert_inline_citations(text: str, citations: list, by_id: dict[str, dict]) -> str:
+    """Attach one consolidated "[Source: ..., Section: ...]" marker to the
+    end of each paragraph, rather than after every individual clause --
+    Cohere's citation spans are often clause-level, which reads as noise
+    if rendered one-for-one. Paragraph is used as the "completed thought"
+    boundary since that's the structural unit the model already produces
+    (one blank-line-separated block per sub-topic)."""
+    paragraphs = _split_paragraphs(text)
+    rendered: list[str] = []
+
+    for start, end, para_text in paragraphs:
+        if not para_text.strip():
+            rendered.append(para_text)
+            continue
+
+        labels: list[str] = []
+        for citation in citations:
+            if citation.end is None or citation.start >= end or citation.end <= start:
+                continue  # citation span doesn't overlap this paragraph
+            for source in (citation.sources or []):
+                chunk = by_id.get(getattr(source, "id", None))
+                if chunk:
+                    label = _source_label(chunk)
+                    if label not in labels:
+                        labels.append(label)
+
+        rendered.append(f"{para_text.rstrip()} {' '.join(labels)}" if labels else para_text)
+
+    return "\n\n".join(rendered)
 
 
 def _extract_text(message) -> str:
