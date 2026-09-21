@@ -2,18 +2,43 @@
 
 A RAG (Retrieval-Augmented Generation) chat app that answers career questions
 (resumes, interviews, salary negotiation, career growth) grounded strictly in
-the PDF guides in `data/`. Runs on Cohere's API (embeddings + chat) with a
-FAISS + BM25 hybrid retriever, so it's light enough for a free hosting tier
-with no GPU and no persistent database.
+the PDF guides in `data/`. Runs entirely on Cohere's API (embeddings, rerank,
+chat via `ClientV2`) with a FAISS + BM25 hybrid retriever, so it's light
+enough for a free hosting tier with no GPU and no persistent database.
 
 ## Architecture
 
 ```
-core/rag.py     PDF ingestion, chunking, hybrid retrieval, Cohere API calls
-app.py          Streamlit UI -- calls core.rag only, never touches secrets
-data/           Source PDFs (the knowledge base)
-Ollama.ipynb    Original local-only prototype (Ollama + MiniLM), kept for reference
+core/ingestion.py   PDF parsing, structure-aware chunking, title/section metadata
+core/retriever.py   Hybrid search (FAISS + BM25 via RRF) -> Cohere Rerank
+core/generator.py   Secret handling, Cohere ClientV2 chat, in-text citations
+app.py              Streamlit UI -- calls core.* only, never touches secrets
+data/                Source PDFs (the knowledge base)
+Cohere_RAG.ipynb     Notebook walkthrough of the same pipeline, cell by cell
 ```
+
+**Retrieval pipeline** (`core/retriever.py:retrieve()`): a query first goes
+through a hybrid stage -- FAISS dense vector search and BM25 sparse keyword
+search, fused with Reciprocal Rank Fusion, filtered by a relevance gate so
+an off-topic query can get **zero** candidates. Whatever survives that gate
+is then passed through **Cohere Rerank** (`rerank-v3.5`), which narrows a
+noisy 8-12-chunk shortlist down to the 3-4 chunks that are genuinely most
+relevant -- this is what keeps context clean and avoids "lost in the
+middle" degradation, rather than just handing the model everything the
+hybrid stage found.
+
+**Chunking** (`core/ingestion.py:build_chunks()`) splits at real section
+boundaries (numbered headers like "2. Format & Structure") before falling
+back to size-based splitting within an over-long section, and every chunk
+carries its document title, section heading, and page number as metadata
+-- not just a page number.
+
+**Citations** (`core/generator.py:generate_answer()`) use Cohere's native
+`documents=`/`citations=` grounding: the model can only cite document IDs
+we actually supplied, so a hallucinated filename is structurally
+impossible. Citation markers are inserted **inline** in the answer text
+(`[Source: doc_title, Section: heading]`) using the citation offsets Cohere
+returns, not regex-parsed from free text.
 
 The index (FAISS vectors + BM25) is built **in memory at startup** from the
 PDFs in `data/` and cached for the process's lifetime — there's no vector
@@ -21,13 +46,15 @@ database file to persist, back up, or go stale.
 
 ## Security model
 
-- `COHERE_API_KEY` is read **only** server-side, in `core/rag.py:resolve_secret()`,
-  which checks Streamlit's secrets manager first, then the OS environment.
+- `COHERE_API_KEY` is read **only** server-side, in
+  `core/generator.py:resolve_secret()`, which checks Streamlit's secrets
+  manager first, then the OS environment.
 - It is never hardcoded, never logged, never included in an HTTP response,
   and never present in any file that gets committed (`.env` and
-  `.streamlit/secrets.toml` are both gitignored).
+  `.streamlit/secrets.toml` are both gitignored, along with `*.pyc` /
+  `__pycache__/`).
 - `app.py` (the UI layer) never touches the raw key at all — it only calls
-  `core.rag` functions and displays their results. There is no code path
+  `core.*` functions and displays their results. There is no code path
   from the browser back to the key.
 - If the key is missing, the app fails with a clear message (see
   screenshot-equivalent below) instead of crashing with a raw traceback or
@@ -74,8 +101,8 @@ streamlit run app.py
    COHERE_API_KEY = "your_real_key_here"
    ```
 6. Click **Save**. Streamlit Cloud injects this into `st.secrets` at
-   runtime — `core/rag.py` reads it automatically via `resolve_secret()`,
-   no code changes needed.
+   runtime — `core/generator.py` reads it automatically via
+   `resolve_secret()`, no code changes needed.
 7. Click **Deploy**. Your app will be live at
    `https://<your-app-name>.streamlit.app`.
 
@@ -116,25 +143,35 @@ streamlit run app.py
    and confirm you get a grounded answer with a "sources cited" expander.
 3. Ask an unrelated question (e.g. *"What's the capital of France?"*) and
    confirm it responds with "No relevant information was found" rather than
-   fabricating an answer — this is the relevance gate in `core/rag.py:retrieve()`
-   working as intended.
+   fabricating an answer — this is the relevance gate in
+   `core/retriever.py:_hybrid_shortlist()` working as intended. Verified
+   live: a "boiling point of water on Mars" query got 0 hybrid candidates,
+   so Rerank and Chat were never even called for it.
 4. Check the sidebar shows a nonzero **"Indexed chunks"** count, confirming
    ingestion + embedding ran successfully against your live Cohere key.
 
 ## Known limitations
 
-- `VECTOR_SIM_THRESHOLD` (default 30%) was tuned empirically against a
-  local MiniLM model in an earlier prototype, not against Cohere's
-  `embed-english-v3.0`. After deploying with a real key, run a few
-  known-relevant and known-irrelevant queries, check the vector-similarity
-  scores logged in `retrieve()`, and adjust `VECTOR_SIM_THRESHOLD` /
-  `BM25_SCORE_THRESHOLD` via environment variables if needed (no code
-  change required).
+- `VECTOR_SIM_THRESHOLD` (30%) and `BM25_SCORE_THRESHOLD` (1.0) gate the
+  hybrid *shortlist* stage; `RERANK_SCORE_THRESHOLD` (0.15) gates the final
+  reranked results and is the more reliable signal, since Cohere's
+  `relevance_score` is a calibrated 0..1 probability rather than raw cosine
+  similarity. All three were tuned empirically against real Cohere scores
+  on this dataset (see `core/retriever.py` comments) — if you swap in a
+  different document set, re-check a few known-relevant/irrelevant queries
+  and adjust via the env vars if needed (no code change required).
+- Retrieval does not incorporate conversation history -- only the raw
+  follow-up question text is embedded/searched/reranked (the chat model
+  sees history, the retriever doesn't). A vague follow-up like "give me
+  one more tip like that" can occasionally retrieve chunks from a
+  different document than the previous turn. Fixing this properly needs a
+  query-rewriting/condensation step and is a reasonable next enhancement,
+  not currently implemented.
 - The in-memory index rebuilds (and re-embeds all chunks via the Cohere API)
-  on every cold start. For this dataset (~70 chunks) that's a single batched
+  on every cold start. For this dataset (~80 chunks) that's a single batched
   API call and takes a couple of seconds — fine at this scale, but would
   need a persisted/cached index for a much larger document set.
 - No authentication/rate-limiting on the public app itself — anyone with the
-  URL can query it (and consume your Cohere quota). Add
-  `st.secrets`-gated basic auth or a platform-level access control if that
-  matters for your use case.
+  URL can query it (and consume your Cohere quota, including Rerank calls
+  on every query). Add `st.secrets`-gated basic auth or a platform-level
+  access control if that matters for your use case.

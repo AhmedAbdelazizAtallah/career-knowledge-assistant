@@ -1,11 +1,12 @@
 """
 Career Knowledge Assistant -- production Streamlit UI over the RAG engine
-in core/rag.py (Cohere embeddings + chat, hybrid FAISS/BM25 retrieval).
+in core/ingestion.py + core/retriever.py + core/generator.py (Cohere
+embeddings + rerank + chat, hybrid FAISS/BM25 retrieval).
 
 SECURITY: this file never reads, displays, or forwards COHERE_API_KEY to
-the browser. It only calls core.rag functions, which read the key
-server-side (see core/rag.py:resolve_secret). No secret ever appears in
-this UI layer's code or in anything rendered to the client.
+the browser. It only calls core.* functions, which read the key
+server-side (see core/generator.py:resolve_secret). No secret ever
+appears in this UI layer's code or in anything rendered to the client.
 
 Local run:
     1. cp .env.example .env   and fill in COHERE_API_KEY
@@ -23,7 +24,8 @@ from dotenv import load_dotenv
 
 load_dotenv()  # no-op in deployment (secrets come from the platform instead)
 
-from core.rag import build_index, generate_answer, get_cohere_client, CHAT_MODEL, EMBED_MODEL
+from core.generator import get_cohere_client, generate_answer, CHAT_MODEL
+from core.retriever import build_index, EMBED_MODEL, RERANK_MODEL
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -41,7 +43,7 @@ h1 { font-weight: 700; letter-spacing: -0.5px; }
 st.title("💼 Career Knowledge Assistant")
 st.caption(
     "RAG chat over resumes, interviews, negotiation & career growth guides — "
-    "powered by Cohere, deployable on the free tier."
+    "hybrid search + Cohere Rerank, deployable on the free tier."
 )
 
 
@@ -64,8 +66,10 @@ except Exception as exc:
 with st.sidebar:
     st.header("📚 Knowledge Base")
     st.metric("Indexed chunks", len(index))
-    st.caption(f"Embed: `{EMBED_MODEL}` · Chat: `{CHAT_MODEL}`")
-    st.caption("Hybrid retrieval: FAISS (vector) + BM25 (keyword)")
+    st.caption(f"Embed: `{EMBED_MODEL}`")
+    st.caption(f"Rerank: `{RERANK_MODEL}`")
+    st.caption(f"Chat: `{CHAT_MODEL}`")
+    st.caption("Pipeline: FAISS + BM25 (RRF) → Cohere Rerank → grounded chat")
     st.divider()
     if st.button("🗑️ Clear conversation", use_container_width=True):
         st.session_state.messages = []
@@ -95,9 +99,14 @@ if prompt := st.chat_input("Ask about resumes, interviews, salary negotiation...
                     "retrieved documents — treat this answer with extra caution."
                 )
 
-            if result["cited_sources"]:
-                with st.expander(f"📎 {len(result['cited_sources'])} source(s) cited"):
-                    for s in result["cited_sources"]:
-                        st.caption(f"**{s['file_name']}** — page {s['page_number']}")
+            if result["sources"]:
+                with st.expander(f"📎 {len(result['sources'])} reranked source(s)"):
+                    for s in result["sources"]:
+                        location = s["section"] or f"Page {s['page_number']}"
+                        st.caption(
+                            f"**{s['document_title']}** — {location}  \n"
+                            f"relevance: {s.get('rerank_score', 0):.2f} "
+                            f"(vector {s['vector_sim']}% · bm25 {s['bm25_score']})"
+                        )
 
     st.session_state.messages.append({"role": "assistant", "content": result["answer"]})
