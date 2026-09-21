@@ -1,3 +1,12 @@
 chroma_db/
 __pycache__/
 .ipynb_checkpoints/
+
+# secrets -- never commit these
+.env
+.streamlit/secrets.toml
+
+# any local vector index artifacts, if ever persisted to disk
+*.faiss
+*.index
+vector_store/

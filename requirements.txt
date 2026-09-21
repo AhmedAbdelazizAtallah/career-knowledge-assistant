@@ -1,0 +1,8 @@
+streamlit==1.52.2
+cohere==7.1.1
+faiss-cpu==1.15.1
+pypdf==6.18.1
+langchain-text-splitters==1.1.2
+rank_bm25==0.2.2
+numpy==2.1.1
+python-dotenv==1.0.1
