@@ -24,8 +24,13 @@ from rank_bm25 import BM25Okapi
 
 # ---------------------------------------------------------------- config --
 
+# Cohere periodically retires undated model aliases (e.g. plain "command-r"
+# was removed in favor of dated versions) -- if chat/embed calls start
+# 404ing with a "model was removed" message, list currently live models
+# with: cohere.Client(api_key=...).models.list(endpoint="chat") and update
+# the default (or override via the env vars below without a code change).
 EMBED_MODEL = os.getenv("COHERE_EMBED_MODEL", "embed-english-v3.0")
-CHAT_MODEL = os.getenv("COHERE_CHAT_MODEL", "command-r")
+CHAT_MODEL = os.getenv("COHERE_CHAT_MODEL", "command-r-08-2024")
 
 CHUNK_SIZE = 700
 CHUNK_OVERLAP = 180
