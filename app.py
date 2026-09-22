@@ -1,7 +1,9 @@
 """
 Career Knowledge Assistant -- production Streamlit UI over the RAG engine
-in core/ingestion.py + core/retriever.py + core/generator.py (Cohere
-embeddings + rerank + chat, hybrid FAISS/BM25 retrieval).
+in core/ (structure-aware ingestion -> persistent Chroma vector store +
+BM25 hybrid retrieval -> Cohere Rerank -> conversational query rewriting
+-> grounded chat with citations). See core/pipeline.py:answer_query for
+the full flow and README.md for architecture details.
 
 SECURITY: this file never reads, displays, or forwards COHERE_API_KEY to
 the browser. It only calls core.* functions, which read the key
@@ -11,7 +13,8 @@ appears in this UI layer's code or in anything rendered to the client.
 Local run:
     1. cp .env.example .env   and fill in COHERE_API_KEY
     2. pip install -r requirements.txt
-    3. streamlit run app.py
+    3. python scripts/ingest.py   (one-time: embeds data/ into chroma_db/)
+    4. streamlit run app.py
 
 Deployment: see README.md for Streamlit Community Cloud / Hugging Face
 Spaces steps, including where to paste the key into each platform's
@@ -24,8 +27,11 @@ from dotenv import load_dotenv
 
 load_dotenv()  # no-op in deployment (secrets come from the platform instead)
 
-from core.generator import get_cohere_client, generate_answer, CHAT_MODEL
-from core.retriever import build_index, EMBED_MODEL, RERANK_MODEL
+from core.embeddings import EMBED_MODEL
+from core.generator import get_cohere_client, CHAT_MODEL
+from core.pipeline import answer_query
+from core.reranker import RERANK_MODEL
+from core.retriever import build_index
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -47,9 +53,12 @@ st.caption(
 )
 
 
-@st.cache_resource(show_spinner="Loading knowledge base (embedding documents via Cohere)...")
+@st.cache_resource(show_spinner="Loading knowledge base...")
 def load_index():
     client = get_cohere_client()  # raises a clear error if COHERE_API_KEY is missing
+    # Reads the persistent Chroma store built by scripts/ingest.py; only
+    # embeds (and only then) if that store turns out to be empty, e.g. a
+    # fresh clone that hasn't been ingested yet.
     return build_index(DATA_DIR, client)
 
 
@@ -69,7 +78,7 @@ with st.sidebar:
     st.caption(f"Embed: `{EMBED_MODEL}`")
     st.caption(f"Rerank: `{RERANK_MODEL}`")
     st.caption(f"Chat: `{CHAT_MODEL}`")
-    st.caption("Pipeline: FAISS + BM25 (RRF) → Cohere Rerank → grounded chat")
+    st.caption("Pipeline: rewrite → Chroma + BM25 (RRF) → Cohere Rerank → grounded chat")
     st.divider()
     if st.button("🗑️ Clear conversation", use_container_width=True):
         st.session_state.messages = []
@@ -90,21 +99,30 @@ if prompt := st.chat_input("Ask about resumes, interviews, salary negotiation...
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             history = st.session_state.messages[:-1]
-            result = generate_answer(index, prompt, history)
+            result = answer_query(index, prompt, history)
             st.markdown(result["answer"])
 
-            if result["sources"] and not result["grounded"]:
+            if result.get("rewritten_query") and result["rewritten_query"] != prompt:
+                st.caption(f"🔎 Searched for: _{result['rewritten_query']}_")
+
+            if result["citations"]:
+                st.markdown("**Sources:**  \n" + "  \n".join(result["citations"]))
+            elif result["sources"] and not result["grounded"]:
                 st.warning(
                     "⚠️ The model answered without citing a specific source from the "
                     "retrieved documents — treat this answer with extra caution."
                 )
 
             if result["sources"]:
-                with st.expander(f"📎 {len(result['sources'])} reranked source(s)"):
+                with st.expander(f"📎 {len(result['sources'])} reranked source(s) (debug)"):
                     for s in result["sources"]:
-                        location = s["section"] or f"Page {s['page_number']}"
+                        page = (
+                            f"Page {s['parent_page_start']}"
+                            if s["parent_page_start"] == s["parent_page_end"]
+                            else f"Pages {s['parent_page_start']}-{s['parent_page_end']}"
+                        )
                         st.caption(
-                            f"**{s['document_title']}** — {location}  \n"
+                            f"**{s['document_title']}** — {s['section'] or page}  \n"
                             f"relevance: {s.get('rerank_score', 0):.2f} "
                             f"(vector {s['vector_sim']}% · bm25 {s['bm25_score']})"
                         )

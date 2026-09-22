@@ -1,0 +1,114 @@
+[
+  {
+    "id": "resume-xyz-formula",
+    "question": "What is the X-Y-Z formula for writing resume bullets?",
+    "expected_answer": "Accomplished [X], measured by [Y], by doing [Z] -- e.g. 'Reduced customer churn by 18% by redesigning the onboarding email sequence, resulting in $240K in retained annual revenue.'",
+    "relevant_document": "01_Resume_Writing_Best_Practices.pdf",
+    "relevant_pages": [2]
+  },
+  {
+    "id": "resume-ai-screening-changes",
+    "question": "What changed about how AI screens resumes?",
+    "expected_answer": "AI screening now does semantic matching, not just exact keyword matching; parsing is still the first gate (a broken layout fails before content is considered); hidden-text keyword stuffing is detected and penalized; and evidence (tools, scale, outcomes) outweighs generic skill lists.",
+    "relevant_document": "01_Resume_Writing_Best_Practices.pdf",
+    "relevant_pages": [1]
+  },
+  {
+    "id": "resume-structure-sections",
+    "question": "What sections make up the recommended 2026 resume structure?",
+    "expected_answer": "Header, Value Proposition Summary, Core Competencies/Skills, Professional Experience, Education & Certifications, and an optional Projects/Portfolio section.",
+    "relevant_document": "01_Resume_Writing_Best_Practices.pdf",
+    "relevant_pages": [1, 2]
+  },
+  {
+    "id": "jd-requirement-tiers",
+    "question": "What are the three tiers requirements are separated into when analyzing a job description?",
+    "expected_answer": "Must-haves (dealbreakers), Nice-to-haves (differentiators), and Implied requirements (unwritten but expected).",
+    "relevant_document": "02_How_to_Analyze_a_Job_Description.pdf",
+    "relevant_pages": [1]
+  },
+  {
+    "id": "jd-red-flags",
+    "question": "What red flags should I watch for in a job description?",
+    "expected_answer": "A wildly long list of required skills spanning multiple specialties, vague responsibilities with no clear success metric, and a salary range that's absent or so wide it's meaningless.",
+    "relevant_document": "02_How_to_Analyze_a_Job_Description.pdf",
+    "relevant_pages": [2]
+  },
+  {
+    "id": "behavioral-star-meaning",
+    "question": "What does each letter in the STAR method stand for?",
+    "expected_answer": "S = Situation (brief context), T = Task (your specific responsibility), A = Action (what you specifically did), R = Result (the measurable outcome and what you learned).",
+    "relevant_document": "03_Behavioral_Interview_Framework.pdf",
+    "relevant_pages": [1]
+  },
+  {
+    "id": "behavioral-common-mistakes",
+    "question": "What are common mistakes to avoid when answering behavioral interview questions?",
+    "expected_answer": "Answering with a hypothetical instead of a real example, rambling without a clear result, choosing a story too small in scope, reusing the same story for every question, and badmouthing a former employer or manager.",
+    "relevant_document": "03_Behavioral_Interview_Framework.pdf",
+    "relevant_pages": [2, 3]
+  },
+  {
+    "id": "technical-system-design-steps",
+    "question": "What are the five steps of the system design interview framework?",
+    "expected_answer": "1) Clarify requirements, 2) Estimate scale, 3) High-level design, 4) Deep dive on 1-2 components, 5) Trade-offs and bottlenecks.",
+    "relevant_document": "04_Technical_Interview_and_System_Design.pdf",
+    "relevant_pages": [2]
+  },
+  {
+    "id": "technical-interview-formats",
+    "question": "What are the three technical interview formats candidates encounter in 2026?",
+    "expected_answer": "AI-banned proctored coding, AI-assisted coding rounds (graded on how well you use the tool), and take-home / open-ended system design discussions.",
+    "relevant_document": "04_Technical_Interview_and_System_Design.pdf",
+    "relevant_pages": [1]
+  },
+  {
+    "id": "salary-preparation",
+    "question": "What should I do to prepare before any salary negotiation conversation?",
+    "expected_answer": "Research market rate from multiple sources, factor in your location/company size/experience, decide your target/walk-away minimum/ideal number in advance, and understand the full compensation package, not just base salary.",
+    "relevant_document": "05_Salary_Negotiation_Playbook.pdf",
+    "relevant_pages": [1]
+  },
+  {
+    "id": "salary-common-mistakes",
+    "question": "What are common mistakes people make when negotiating salary?",
+    "expected_answer": "Accepting the first offer without countering, giving a number before researching, treating negotiation as adversarial, only negotiating base salary and ignoring equity/bonus/start date, making an ultimatum you're not prepared to follow through on, and not getting verbal agreements in writing.",
+    "relevant_document": "05_Salary_Negotiation_Playbook.pdf",
+    "relevant_pages": [2]
+  },
+  {
+    "id": "branding-mentor-vs-sponsor",
+    "question": "What's the difference between a mentor and a sponsor?",
+    "expected_answer": "A mentor gives advice; a sponsor actively advocates for you in rooms you're not in. Most people only seek a mentor, not a sponsor.",
+    "relevant_document": "06_Career_Growth_and_Personal_Branding.pdf",
+    "relevant_pages": [1]
+  },
+  {
+    "id": "branding-where-to-invest",
+    "question": "Where should I invest my time for personal branding?",
+    "expected_answer": "LinkedIn, a portfolio or GitHub, writing (blog/newsletter/long-form posts), and speaking or teaching (tech talks, meetups, mentoring).",
+    "relevant_document": "06_Career_Growth_and_Personal_Branding.pdf",
+    "relevant_pages": [1]
+  },
+  {
+    "id": "data-roles-overview",
+    "question": "What are the five data-related tech roles and what tools does each primarily use?",
+    "expected_answer": "Data Analyst (SQL, Excel, Power BI/Tableau), Business Analyst (SQL, Excel, Jira, Confluence), Data Engineer (SQL, Python/Scala, Spark, Airflow, dbt, cloud), Data Scientist (Python/R, scikit-learn, statsmodels, SQL), AI Engineer (Python, LangChain/LangGraph, vector DBs, LLM APIs, Docker).",
+    "relevant_document": "07_Data_Roles_Roadmaps_and_Tools.pdf",
+    "relevant_pages": [1]
+  },
+  {
+    "id": "data-ai-engineer-vs-scientist",
+    "question": "How does the AI Engineer role differ from Data Scientist, and what should an AI Engineer learn?",
+    "expected_answer": "A data scientist optimizes for correctness in a notebook; an AI engineer optimizes for correctness in production under load with real users over time. AI engineers should learn software engineering fundamentals, LLM orchestration, RAG (chunking, embeddings, vector DBs, reranking), production system design, deployment/MLOps, and evaluation.",
+    "relevant_document": "07_Data_Roles_Roadmaps_and_Tools.pdf",
+    "relevant_pages": [2, 3]
+  },
+  {
+    "id": "out-of-corpus-question",
+    "question": "What is the capital of France?",
+    "expected_answer": "The knowledge base does not contain this information -- it should be refused, not guessed.",
+    "relevant_document": null,
+    "relevant_pages": []
+  }
+]
