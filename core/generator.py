@@ -156,17 +156,28 @@ def _split_paragraphs(text: str) -> list[tuple[int, int, str]]:
     return paragraphs
 
 
-def _insert_inline_citations(text: str, citations: list, by_id: dict[str, dict], lang: str = "en") -> str:
-    """Attach one consolidated "[Source: ..., Section: ...]" marker to the
-    end of each paragraph, rather than after every individual clause --
-    Cohere's citation spans are often clause-level, which reads as noise
-    if rendered one-for-one. Paragraph is used as the "completed thought"
+def _insert_inline_citations(
+    text: str, citations: list, by_id: dict[str, dict], lang: str, key_index: dict[tuple[str, str], int],
+) -> str:
+    """Attach one consolidated citation marker to the end of each
+    paragraph, rather than after every individual clause -- Cohere's
+    citation spans are often clause-level, which reads as noise if
+    rendered one-for-one. Paragraph is used as the "completed thought"
     boundary since that's the structural unit the model already produces
-    (one blank-line-separated block per sub-topic). `lang` renders the
-    "[Source: ..., Section: ...]" boilerplate itself in Arabic so it
-    doesn't read as a jarring English fragment dropped into an Arabic
-    answer -- the underlying document title/section text stays as-is
-    (it's English PDF content either way)."""
+    (one blank-line-separated block per sub-topic).
+
+    For English, the marker is the full "[Source: title, Section: heading]"
+    text. For Arabic, it's a short numeric "[1] [2]" reference matching the
+    "Sources:" list instead -- a long bracketed run of English document
+    titles/section names embedded inline forces the browser to line-wrap
+    *inside* that mixed-script run, which is exactly what produced the
+    scrambled-looking output reported and confirmed visually: the
+    paragraph's own RTL direction was correct, but wrapping mid-citation
+    made multiple stacked citations unreadable. Short numeric refs are
+    bidi-neutral and immune to that, at the cost of requiring a reader to
+    check the footer for which document each number is -- an accepted
+    tradeoff verified against the same real generated text that showed
+    the original problem, before this was applied to live generation."""
     paragraphs = _split_paragraphs(text)
     rendered: list[str] = []
 
@@ -181,10 +192,15 @@ def _insert_inline_citations(text: str, citations: list, by_id: dict[str, dict],
                 continue  # citation span doesn't overlap this paragraph
             for source in (citation.sources or []):
                 chunk = by_id.get(getattr(source, "id", None))
-                if chunk:
+                if not chunk:
+                    continue
+                if lang == "ar":
+                    key = (chunk["document_name"], _page_label(chunk, lang))
+                    label = f"[{key_index[key]}]"
+                else:
                     label = _source_label(chunk, lang)
-                    if label not in labels:
-                        labels.append(label)
+                if label not in labels:
+                    labels.append(label)
 
         rendered.append(f"{para_text.rstrip()} {' '.join(labels)}" if labels else para_text)
 
@@ -235,7 +251,6 @@ def generate_answer(
     by_id = {c["chunk_id"]: c for c in retrieved}
     citations = response.message.citations or []
     raw_text = extract_text(response.message)
-    answer_with_citations = _insert_inline_citations(raw_text, citations, by_id, lang)
 
     cited_keys: list[tuple[str, str]] = []  # preserve first-cited order for numbering
     for citation in citations:
@@ -245,7 +260,9 @@ def generate_answer(
                 key = (chunk["document_name"], _page_label(chunk, lang))
                 if key not in cited_keys:
                     cited_keys.append(key)
+    key_index = {key: i for i, key in enumerate(cited_keys, start=1)}
 
+    answer_with_citations = _insert_inline_citations(raw_text, citations, by_id, lang, key_index)
     cited_sources = [{"document_name": f, "location": loc} for f, loc in cited_keys]
     citation_list = [f"[{i}] {f} — {loc}" for i, (f, loc) in enumerate(cited_keys, start=1)]
 
