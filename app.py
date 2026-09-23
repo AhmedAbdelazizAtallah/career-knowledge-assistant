@@ -50,13 +50,22 @@ h1 { font-weight: 700; letter-spacing: -0.5px; }
    per-message language detection in Python. */
 [data-testid="stChatMessageContent"] p,
 [data-testid="stChatMessageContent"] li,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li {
+    unicode-bidi: plaintext;
+}
+/* unicode-bidi only reorders INLINE text -- it does not move a list's
+   marker box, which is positioned by `direction` (default ltr)
+   regardless of the item's own content. list-style-position: inside
+   makes the bullet/number part of the li's own inline content instead
+   of a separately-positioned box, so it becomes subject to the same
+   per-item bidi reordering as the text and ends up on the correct side
+   for both English (left) and Arabic (right) items. */
 [data-testid="stChatMessageContent"] ul,
 [data-testid="stChatMessageContent"] ol,
-[data-testid="stMarkdownContainer"] p,
-[data-testid="stMarkdownContainer"] li,
 [data-testid="stMarkdownContainer"] ul,
 [data-testid="stMarkdownContainer"] ol {
-    unicode-bidi: plaintext;
+    list-style-position: inside;
 }
 </style>
 """, unsafe_allow_html=True)
