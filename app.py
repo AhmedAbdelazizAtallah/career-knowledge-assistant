@@ -20,6 +20,7 @@ Deployment: see README.md for Streamlit Community Cloud / Hugging Face
 Spaces steps, including where to paste the key into each platform's
 Secrets manager (never into source control).
 """
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -38,35 +39,68 @@ DATA_DIR = PROJECT_ROOT / "data"
 
 st.set_page_config(page_title="Career Knowledge Assistant", page_icon="💼", layout="centered")
 
+_ARABIC_RE = re.compile(r"[\u0600-\u06FF]")
+
+
+def is_arabic(text: str) -> bool:
+    """True if the message contains Arabic script -- used to pick an RTL
+    wrapper for that message only, so English messages keep LTR layout."""
+    return bool(text and _ARABIC_RE.search(text))
+
+
+def render_message(content: str) -> None:
+    """Render one chat message with correct direction.
+
+    Arabic messages are converted from Markdown to HTML in Python and
+    wrapped in <div dir="rtl"> so the whole block (paragraphs AND list
+    markers) lays out right-to-left. English messages use Streamlit's
+    native Markdown renderer unchanged.
+    """
+    if not is_arabic(content):
+        st.markdown(content)
+        return
+    try:
+        import markdown as _md
+
+        html = _md.markdown(content, extensions=["extra"])
+    except Exception:
+        html = None
+    if html:
+        st.markdown(f'<div class="rtl-chat" dir="rtl" lang="ar">{html}</div>', unsafe_allow_html=True)
+    else:  # markdown lib unavailable -- fall back to native rendering
+        st.markdown(content)
+
+
 st.markdown("""
 <style>
 .stChatMessage { border-radius: 14px; }
 h1 { font-weight: 700; letter-spacing: -0.5px; }
 [data-testid="stSidebar"] { border-right: 1px solid rgba(128,128,128,0.2); }
-/* Arabic answers should render right-to-left; unicode-bidi: plaintext
-   auto-detects each paragraph's own direction from its content (the CSS
-   equivalent of the HTML dir="auto" attribute), so English and Arabic
-   messages in the same conversation each render correctly without any
-   per-message language detection in Python. */
+/* English (and any non-Arabic) messages: per-paragraph auto direction
+   (CSS equivalent of dir="auto") so mixed conversations still work. */
 [data-testid="stChatMessageContent"] p,
 [data-testid="stChatMessageContent"] li,
 [data-testid="stMarkdownContainer"] p,
 [data-testid="stMarkdownContainer"] li {
     unicode-bidi: plaintext;
 }
-/* unicode-bidi only reorders INLINE text -- it does not move a list's
-   marker box, which is positioned by `direction` (default ltr)
-   regardless of the item's own content. list-style-position: inside
-   makes the bullet/number part of the li's own inline content instead
-   of a separately-positioned box, so it becomes subject to the same
-   per-item bidi reordering as the text and ends up on the correct side
-   for both English (left) and Arabic (right) items. */
-[data-testid="stChatMessageContent"] ul,
-[data-testid="stChatMessageContent"] ol,
-[data-testid="stMarkdownContainer"] ul,
-[data-testid="stMarkdownContainer"] ol {
-    list-style-position: inside;
+/* Arabic messages rendered via render_message() inside .rtl-chat:
+   the whole block is RTL so list markers dock on the right. Padding
+   is mirrored (padding-right instead of padding-left) for the same
+   reason. `outside` keeps markers aligned in a clean column. */
+.rtl-chat { direction: rtl; text-align: right; }
+.rtl-chat p { text-align: right; unicode-bidi: plaintext; }
+.rtl-chat ul, .rtl-chat ol {
+    direction: rtl;
+    text-align: right;
+    padding-right: 1.5em;
+    padding-left: 0;
+    margin-right: 0;
+    list-style-position: outside;
 }
+.rtl-chat li { text-align: right; unicode-bidi: plaintext; margin-bottom: 0.3em; }
+/* Arabic typed into the chat box should flow right-to-left as well. */
+[data-testid="stChatInput"] textarea { unicode-bidi: plaintext; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -113,24 +147,27 @@ if "messages" not in st.session_state:
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+        render_message(msg["content"])
 
 if prompt := st.chat_input("Ask about resumes, interviews, salary negotiation..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(prompt)
+        render_message(prompt)
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             history = st.session_state.messages[:-1]
             result = answer_query(index, prompt, history)
-            st.markdown(result["answer"])
+            render_message(result["answer"])
 
             if result.get("rewritten_query") and result["rewritten_query"] != prompt:
                 st.caption(f"🔎 Searched for: _{result['rewritten_query']}_")
 
             if result["citations"]:
-                st.markdown("**Sources:**  \n" + "  \n".join(result["citations"]))
+                if is_arabic(result["answer"]):
+                    render_message("**المصادر:**  \n" + "  \n".join(result["citations"]))
+                else:
+                    st.markdown("**Sources:**  \n" + "  \n".join(result["citations"]))
             elif result["sources"] and not result["grounded"]:
                 st.warning(
                     "⚠️ The model answered without citing a specific source from the "

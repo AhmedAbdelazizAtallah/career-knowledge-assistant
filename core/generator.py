@@ -55,7 +55,16 @@ SYSTEM_PREAMBLE = (
     "question always gets an English reply; a question written in Arabic always gets a "
     "full reply in clear Modern Standard Arabic (never a partial translation appended "
     "to an English answer), with any example or quoted script translated too. Never "
-    "switch languages mid-answer."
+    "switch languages mid-answer.\n"
+    "7. When replying in Arabic, write RTL-friendly Markdown so browsers render it "
+    "correctly: use '- ' (hyphen + space) at the start of every bullet-list item "
+    "(never the '•' character), one item per line, with a blank line before and "
+    "after each list; prefer Arabic punctuation (، ؛ ؟ «») over mixing Latin "
+    "quotes/parentheses inside Arabic sentences.\n"
+    "8. NEVER write a citation, footnote, or reference marker yourself in any form -- "
+    "no '[1]', '[Source: ...]', footnote numbers, or similar. Citations are added "
+    "automatically after you respond; if you write your own, it will visually "
+    "collide with the real one. Just write the answer text itself."
 )
 
 
@@ -156,6 +165,83 @@ def _split_paragraphs(text: str) -> list[tuple[int, int, str]]:
     return paragraphs
 
 
+# U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
+# Wrapping a run like "[1] [2]" in these keeps the numbers in logical
+# order inside an RTL (Arabic) paragraph. Without it the Unicode bidi
+# algorithm reorders the trailing Latin run and the user sees
+# "[4] [3] [2] [1]" on the wrong side -- the exact "scrambled"
+# rendering reported from Streamlit.
+_LRI = "\u2066"
+_PDI = "\u2069"
+
+
+# Matches a short bracketed span containing a digit -- "[1]", "[Source: 1]",
+# "[Source:0]", etc. -- while sparing long bracketed placeholder phrases
+# the model legitimately writes as part of example scripts (e.g.
+# "[الرقم المستهدف]", "[الفترة الزمنية]"), which never contain a digit.
+# The {0,24} cap keeps it from ever matching across a real sentence that
+# merely happens to contain a number somewhere after an unrelated "[".
+_STRAY_CITATION_PATTERN = re.compile(r"\s*\[(?=[^\[\]]{0,24}\])[^\[\]]*[\d٠-٩][^\[\]]*\]")
+
+
+def _strip_stray_citation_markers(text: str) -> str:
+    """Defensively remove any short digit-bearing bracket token the model
+    may have written on its own initiative -- "[1]", "[Source: 1]",
+    "[Source: 0]", etc. -- before real citation insertion runs.
+
+    Citations are meant to be added entirely by this module's own
+    post-processing, using Cohere's structured citation API -- the model
+    is never asked to type a citation as literal bracket text (rule 8 of
+    SYSTEM_PREAMBLE says so explicitly). In practice it sometimes does so
+    anyway: reproduced live and confirmed by inspecting the model's raw
+    output before this module touches it, on some but not all
+    generations at temperature=0.1 (non-deterministic model behavior,
+    not a bug in the insertion logic). It appears to imitate the
+    "[Source: Title, Section: X]" citation style visible in its own
+    conversation history from a prior English turn, substituting an
+    arbitrary number since it has no real title to put there. A stray
+    bracket like this is visually indistinguishable from, and interleaves
+    confusingly with, the real numbered citations this module inserts,
+    so it's removed structurally here rather than relied on prompting
+    alone to prevent -- prompting reduces but does not guarantee this."""
+    return _STRAY_CITATION_PATTERN.sub("", text)
+
+
+def _normalize_arabic_markdown(text: str) -> str:
+    """Normalize Arabic model output to RTL-friendly Markdown.
+
+    The model often emits '•' / '·' / '●' / '–' bullets (sometimes without
+    a space, sometimes without surrounding blank lines). Markdown does not
+    recognise those as lists, so Streamlit renders them as plain paragraphs
+    and the bullet glyph ends up on the wrong side in RTL. Convert every
+    bullet-like line to a real '- ' list item and guarantee blank lines
+    around list blocks so they parse as <ul>/<li>.
+    """
+    lines = text.split("\n")
+    out: list[str] = []
+    for line in lines:
+        m = re.match(r"^\s*[•·●▪●\-–—*]\s*(.*\S)\s*$", line)
+        if m:
+            # Skip Markdown bold/italic markers like "**text**" or "*text*"
+            # which also start with '*' but are not list items.
+            stripped = line.lstrip()
+            if stripped.startswith("**") or (stripped.startswith("*") and not re.match(r"^\*\s+", stripped)):
+                out.append(line)
+            else:
+                out.append(f"- {m.group(1)}")
+        else:
+            # '-text' without a space is not a list item for Markdown.
+            m2 = re.match(r"^(\s*)-(\S.*)$", line)
+            out.append(f"{m2.group(1)}- {m2.group(2)}" if m2 else line)
+    text = "\n".join(out)
+    # Ensure a blank line before the first list item after a paragraph so
+    # Markdown actually opens a <ul> (required for correct RTL markers).
+    text = re.sub(r"([^\n])\n((?:\s*-\s).+)", r"\1\n\n\2", text)
+    # Collapse 3+ blank lines to a double newline.
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _insert_inline_citations(
     text: str, citations: list, by_id: dict[str, dict], lang: str, key_index: dict[tuple[str, str], int],
 ) -> str:
@@ -202,7 +288,14 @@ def _insert_inline_citations(
                 if label not in labels:
                     labels.append(label)
 
-        rendered.append(f"{para_text.rstrip()} {' '.join(labels)}" if labels else para_text)
+        if not labels:
+            rendered.append(para_text)
+        elif lang == "ar":
+            # Isolate the Latin citation run so bidi keeps "[1] [2]"
+            # in order at the end of the RTL paragraph.
+            rendered.append(f"{para_text.rstrip()} {_LRI}{' '.join(labels)}{_PDI}")
+        else:
+            rendered.append(f"{para_text.rstrip()} {' '.join(labels)}")
 
     return "\n\n".join(rendered)
 
@@ -262,9 +355,17 @@ def generate_answer(
                     cited_keys.append(key)
     key_index = {key: i for i, key in enumerate(cited_keys, start=1)}
 
+    if lang == "ar":
+        raw_text = _strip_stray_citation_markers(raw_text)
+        raw_text = _normalize_arabic_markdown(raw_text)
     answer_with_citations = _insert_inline_citations(raw_text, citations, by_id, lang, key_index)
     cited_sources = [{"document_name": f, "location": loc} for f, loc in cited_keys]
-    citation_list = [f"[{i}] {f} — {loc}" for i, (f, loc) in enumerate(cited_keys, start=1)]
+    if lang == "ar":
+        # Isolate the Latin filename so "Sources" footer lines don't reorder
+        # when rendered inside an RTL block.
+        citation_list = [f"[{i}] {_LRI}{f}{_PDI} — {loc}" for i, (f, loc) in enumerate(cited_keys, start=1)]
+    else:
+        citation_list = [f"[{i}] {f} — {loc}" for i, (f, loc) in enumerate(cited_keys, start=1)]
 
     return {
         "answer": answer_with_citations,
