@@ -43,6 +43,21 @@ st.markdown("""
 .stChatMessage { border-radius: 14px; }
 h1 { font-weight: 700; letter-spacing: -0.5px; }
 [data-testid="stSidebar"] { border-right: 1px solid rgba(128,128,128,0.2); }
+/* Arabic answers should render right-to-left; unicode-bidi: plaintext
+   auto-detects each paragraph's own direction from its content (the CSS
+   equivalent of the HTML dir="auto" attribute), so English and Arabic
+   messages in the same conversation each render correctly without any
+   per-message language detection in Python. */
+[data-testid="stChatMessageContent"] p,
+[data-testid="stChatMessageContent"] li,
+[data-testid="stChatMessageContent"] ul,
+[data-testid="stChatMessageContent"] ol,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] ul,
+[data-testid="stMarkdownContainer"] ol {
+    unicode-bidi: plaintext;
+}
 </style>
 """, unsafe_allow_html=True)
 

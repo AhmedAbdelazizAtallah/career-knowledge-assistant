@@ -1,11 +1,15 @@
 """Regression tests for core/retriever.py's fusion/mode logic, using a
 fake Cohere client (no network calls) so these run offline and in CI."""
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from core.ingestion import Chunk
-from core.retriever import RagIndex, _hybrid_shortlist, tokenize
-from core.vectorstore import VectorStore
+from core.retriever import RagIndex, _hybrid_shortlist, build_index, tokenize
+from core.vectorstore import EmbedModelMismatchError, VectorStore
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 
 class _FakeEmbedResponse:
@@ -66,3 +70,34 @@ def test_empty_index_returns_empty_shortlist(tmp_path):
     store = VectorStore(persist_dir=str(tmp_path / "chroma"), collection_name="empty")
     empty_index = RagIndex(_FakeCohereClient(), store)
     assert _hybrid_shortlist(empty_index, "anything", candidate_pool=5) == []
+
+
+def test_build_index_rejects_a_different_embed_model_without_rebuild(tmp_path):
+    store = VectorStore(persist_dir=str(tmp_path / "chroma"), collection_name="test")
+    build_index(DATA_DIR, _FakeCohereClient(), store=store, embed_model="model-a")
+
+    with pytest.raises(EmbedModelMismatchError):
+        build_index(DATA_DIR, _FakeCohereClient(), store=store, embed_model="model-b")
+
+
+def test_build_index_force_reingest_allows_switching_embed_model(tmp_path):
+    store = VectorStore(persist_dir=str(tmp_path / "chroma"), collection_name="test")
+    build_index(DATA_DIR, _FakeCohereClient(), store=store, embed_model="model-a")
+
+    build_index(DATA_DIR, _FakeCohereClient(), store=store, embed_model="model-b", force_reingest=True)
+    assert store.get_embed_model() == "model-b"
+
+
+def test_build_index_does_not_reingest_when_model_matches(tmp_path):
+    store = VectorStore(persist_dir=str(tmp_path / "chroma"), collection_name="test")
+    build_index(DATA_DIR, _FakeCohereClient(), store=store, embed_model="model-a")
+    count_after_first = len(store)
+
+    # A second call with the same model must be a cheap local read, not a
+    # re-embed -- verified indirectly: chunk count is unchanged (upsert of
+    # identical content-hash ids would be a no-op anyway, but re-ingesting
+    # at all would mean this test is silently paying for API calls it
+    # shouldn't in a real run).
+    index = build_index(DATA_DIR, _FakeCohereClient(), store=store, embed_model="model-a")
+    assert len(store) == count_after_first
+    assert len(index) == count_after_first

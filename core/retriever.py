@@ -9,6 +9,7 @@ middle" degradation. Parent expansion is what keeps a section's
 content whole once any fragment of it has been judged relevant, instead
 of handing the generator an arbitrary page-sized slice of it.
 """
+import logging
 import os
 import re
 from pathlib import Path
@@ -19,7 +20,9 @@ from rank_bm25 import BM25Okapi
 from core.embeddings import EMBED_MODEL, embed_texts
 from core.ingestion import build_chunks
 from core.reranker import rerank
-from core.vectorstore import VectorStore
+from core.vectorstore import EmbedModelMismatchError, VectorStore
+
+logger = logging.getLogger(__name__)
 
 # "Top 20-50 candidates -> reranker -> top 5-10" per the standard
 # two-stage retrieval pattern: the hybrid stage casts a wide net, the
@@ -88,21 +91,47 @@ def build_index(
     embeds+upserts the corpus. Normal app startup is just a fast local
     read -- no PDF parsing or embedding API calls on every restart.
 
-    `embed_model` only takes effect on an actual (re)ingestion. Passing a
-    different `embed_model` against a store that already holds vectors
-    from another model, without `force_reingest`, produces incompatible
-    query/document vectors -- always pair a non-default `embed_model`
-    with an isolated store or `force_reingest=True` (see eval/run_eval.py).
+    `embed_model` only takes effect on an actual (re)ingestion. Raises
+    EmbedModelMismatchError rather than silently continuing if a
+    non-empty store was built with a *different* embed model than
+    requested -- comparing query and document vectors from two different
+    embedding models produces meaningless similarity scores with no
+    obvious symptom other than "retrieval seems broken."
     """
-    store = store or VectorStore()
+    # `store or VectorStore()` would be wrong here: VectorStore defines
+    # __len__, so a caller-supplied store that's simply empty (the normal
+    # state on a fresh deploy before first ingestion) is falsy and would
+    # be silently discarded in favor of a brand-new default-path store.
+    store = store if store is not None else VectorStore()
+    stored_model = store.get_embed_model()
+
+    if force_reingest:
+        store.reset()
+        stored_model = None
+    elif len(store) > 0:
+        if stored_model and stored_model != embed_model:
+            raise EmbedModelMismatchError(
+                f"The store at '{store.persist_dir}' was built with embed model "
+                f"'{stored_model}', but '{embed_model}' was requested. Run "
+                f"`python scripts/ingest.py --rebuild` to rebuild it with the new "
+                f"model before querying, or set COHERE_EMBED_MODEL back to "
+                f"'{stored_model}'."
+            )
+        if not stored_model:
+            logger.warning(
+                "Store at '%s' has %d chunk(s) but no recorded embed model (built "
+                "before this check existed) -- cannot verify it matches '%s'. If "
+                "retrieval looks broken, run `python scripts/ingest.py --rebuild`.",
+                store.persist_dir, len(store), embed_model,
+            )
+
     if force_reingest or len(store) == 0:
-        if force_reingest:
-            store.reset()
         chunks = build_chunks(data_dir)
         if not chunks:
             raise RuntimeError(f"No text could be extracted from any PDF in {data_dir}")
         embeddings = embed_texts(client, [c.text for c in chunks], input_type="search_document", model=embed_model)
         store.upsert(chunks, embeddings)
+        store.set_embed_model(embed_model)
     return RagIndex(client, store, embed_model=embed_model)
 
 

@@ -23,6 +23,14 @@ COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "career_knowledge_base")
 _COLLECTION_METADATA = {"hnsw:space": "cosine"}
 
 
+class EmbedModelMismatchError(RuntimeError):
+    """A store already holds vectors from a different embedding model than
+    the one about to be used to query it -- comparing across two models'
+    vector spaces silently produces meaningless similarity scores rather
+    than an obvious error, so this must be caught explicitly instead of
+    left as a documentation-only caveat."""
+
+
 def _chunk_metadata(c: Chunk) -> dict:
     return {
         "document_id": c.document_id,
@@ -56,6 +64,18 @@ class VectorStore:
         self.collection = self._client.get_or_create_collection(
             name=name, metadata=_COLLECTION_METADATA,
         )
+
+    def get_embed_model(self) -> str | None:
+        """The embed model recorded at the last (re)ingestion, or None for
+        an empty store or one created before this tracking existed."""
+        return (self.collection.metadata or {}).get("embed_model")
+
+    def set_embed_model(self, embed_model: str) -> None:
+        # Chroma forbids ever re-submitting "hnsw:space" in a modify() call
+        # (even the same unchanged value raises), so this must NOT include
+        # _COLLECTION_METADATA -- distance space is fixed at creation and
+        # isn't re-derived from metadata afterwards anyway.
+        self.collection.modify(metadata={"embed_model": embed_model})
 
     def upsert(self, chunks: list[Chunk], embeddings: np.ndarray) -> None:
         if not chunks:

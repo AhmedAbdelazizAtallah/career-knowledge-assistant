@@ -58,3 +58,15 @@ def test_query_on_empty_store_returns_empty_list(store):
 def test_upsert_empty_list_is_a_noop(store):
     store.upsert([], np.zeros((0, 2), dtype="float32"))
     assert len(store) == 0
+
+
+def test_embed_model_round_trips_through_metadata(store):
+    assert store.get_embed_model() is None
+    store.set_embed_model("embed-multilingual-v3.0")
+    assert store.get_embed_model() == "embed-multilingual-v3.0"
+
+
+def test_reset_clears_recorded_embed_model(store):
+    store.set_embed_model("embed-multilingual-v3.0")
+    store.reset()
+    assert store.get_embed_model() is None
