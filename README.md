@@ -71,6 +71,20 @@ impossible. Citations appear two ways: inline markers after each paragraph
 returns, and a numbered source list (`[1] document.pdf — Page 12`) built
 from the same verified citations.
 
+**Language support**: the source PDFs are English, but the pipeline
+understands and replies in other languages too -- Arabic in particular has
+been verified end-to-end. `embed-multilingual-v3.0` (100+ languages) is
+what makes cross-lingual retrieval work: an Arabic question and the
+English content it should match land close together in the same vector
+space. `core/generator.py`'s system prompt instructs the model to always
+reply in the language the current question is written in (translating
+facts out of the English source material rather than defaulting to
+English), and the citation label boilerplate itself ("Source"/"Section"/
+"Page") renders in Arabic when the question is Arabic. The conversational
+query-rewrite step (`core/query_processing.py`) is explicitly told never
+to translate a rewritten follow-up into a different language than the
+original question.
+
 **Persistence**: embeddings are stored in a local, disk-persisted Chroma
 collection (`chroma_db/`, gitignored) via `core/vectorstore.py`. The app
 only *reads* that store at startup (`core/retriever.py:build_index()`) --
@@ -147,7 +161,7 @@ deployment platform's secrets manager) with sensible defaults baked in:
 
 | Variable | Default | Controls |
 |---|---|---|
-| `COHERE_EMBED_MODEL` | `embed-english-v3.0` | Embedding model (`core/embeddings.py`) |
+| `COHERE_EMBED_MODEL` | `embed-multilingual-v3.0` | Embedding model (`core/embeddings.py`) |
 | `COHERE_RERANK_MODEL` | `rerank-v3.5` | Reranker model (`core/reranker.py`) |
 | `COHERE_CHAT_MODEL` | `command-r-08-2024` | Chat + query-rewrite model |
 | `RETRIEVAL_CANDIDATE_POOL` | `20` | Hybrid-stage shortlist size before reranking |
